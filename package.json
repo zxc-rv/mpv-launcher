@@ -1,0 +1,92 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "mpv-launcher",
+  "title": "MPV Launcher",
+  "description": "Browse and play media files using MPV player",
+  "icon": "icon.ico",
+  "author": "Revolution",
+  "categories": [
+    "Media"
+  ],
+  "license": "MIT",
+  "platforms": [
+    "Windows"
+  ],
+  "commands": [
+    {
+      "name": "mpv-launcher",
+      "title": "Play",
+      "description": "Browse and play media files",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "animeDirectory",
+      "title": "Путь к аниме",
+      "description": "Full path to your anime directory",
+      "type": "textfield",
+      "required": true,
+      "default": "S:/Videos/Аниме"
+    },
+    {
+      "name": "animeArguments",
+      "title": "Аргументы для аниме",
+      "description": "Command line arguments for anime",
+      "type": "textfield",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "seriesDirectory",
+      "title": "Путь к сериалам",
+      "description": "The directory where your series are stored.",
+      "type": "textfield",
+      "required": true,
+      "default": "S:/Videos/Сериалы"
+    },
+    {
+      "name": "seriesArguments",
+      "title": "Аргументы для сериалов",
+      "description": "Command line arguments for series",
+      "type": "textfield",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "filmsDirectory",
+      "title": "Путь к фильмам",
+      "description": "Full path to your films directory",
+      "type": "textfield",
+      "required": true,
+      "default": "S:/Videos/Фильмы"
+    },
+    {
+      "name": "filmsArguments",
+      "title": "Аргументы для фильмов",
+      "description": "Command line arguments for films",
+      "type": "textfield",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.100.3",
+    "@raycast/utils": "^1.19.1"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^1.0.11",
+    "@types/node": "18.18.4",
+    "@types/react": "19.0.10",
+    "eslint": "^8.57.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "publish": "ray publish"
+  }
+}
