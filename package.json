@@ -3,7 +3,7 @@
   "name": "mpv-launcher",
   "title": "MPV Launcher",
   "description": "Browse and play media files using MPV player",
-  "icon": "icon.ico",
+  "icon": "icon.png",
   "author": "Revolution",
   "categories": [
     "Media"
