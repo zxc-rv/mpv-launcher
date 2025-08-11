@@ -257,9 +257,10 @@ export default function Command() {
 
   const sortedLastPlayed = useMemo(() => {
     return lastPlayed
+      .filter((item) => folders.some((f) => f.path === item.path)) // Показываем только те, что есть в folders
       .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
       .slice(0, 5);
-  }, [lastPlayed]);
+  }, [lastPlayed, folders]);
 
   useEffect(() => {
     async function initialLoad() {
@@ -857,20 +858,13 @@ export default function Command() {
 
       const subtitle = useMemo(() => {
         if (folder.type !== "film") {
-          // Для "Продолжить просмотр" берем актуальный счетчик из folders
-          let actualSeriesCount = folder.seriesCount;
-          if (isLastPlayed) {
-            const currentFolder = folders.find((f) => f.path === folder.path);
-            if (currentFolder) {
-              actualSeriesCount = currentFolder.seriesCount;
-            }
-          }
-          return `${actualSeriesCount} ${getSeriesDeclension(actualSeriesCount)}`;
+          // Теперь folder.seriesCount уже актуальный из folders
+          return `${folder.seriesCount} ${getSeriesDeclension(folder.seriesCount)}`;
         }
         return isLastPlayed && "lastPlayedAt" in folder
           ? formatLastPlayedTime(folder.lastPlayedAt)
           : undefined;
-      }, [folder, isLastPlayed, folders]);
+      }, [folder, isLastPlayed]);
 
       return (
         <Grid.Item
@@ -902,13 +896,25 @@ export default function Command() {
     >
       {sortedLastPlayed.length > 0 && !debouncedSearch && (
         <Grid.Section title="Продолжить просмотр">
-          {sortedLastPlayed.map((item) => (
-            <GridItemWithLazyThumbnail
-              key={item.id}
-              folder={item}
-              isLastPlayed={true}
-            />
-          ))}
+          {sortedLastPlayed.map((item) => {
+            // Берем актуальные данные из folders
+            const actualFolder = folders.find((f) => f.path === item.path);
+            if (!actualFolder) return null; // Не показываем если папка не найдена
+
+            const folderWithLastPlayedData = {
+              ...actualFolder, // Все актуальные данные из folders
+              id: item.id, // Сохраняем id для key
+              lastPlayedAt: item.lastPlayedAt, // Сохраняем время последнего просмотра
+            };
+
+            return (
+              <GridItemWithLazyThumbnail
+                key={item.id}
+                folder={folderWithLastPlayedData}
+                isLastPlayed={true}
+              />
+            );
+          })}
         </Grid.Section>
       )}
 
