@@ -9,7 +9,7 @@
 winget install Node.js ffmpeg
 ```
 
-3. Клонировать репо
+3. Клонировать репозиторий
 
 ```
 git clone https://github.com/zxc-rv/mpv-launcher && cd mpv-launcher
