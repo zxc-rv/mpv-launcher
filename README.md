@@ -1,7 +1,5 @@
 Плагин mpv-launcher для Raycast на Windows
 
-DEV TEST
-
 Установить:
 
 1. Установить mpv и добавить в PATH
