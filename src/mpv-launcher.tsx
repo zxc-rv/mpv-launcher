@@ -663,10 +663,7 @@ export default function Command() {
           : [];
       }
 
-      const child = spawn("mpv", [videoFile, ...args], {
-        detached: true,
-        stdio: "ignore",
-      });
+      const child = spawn("mpv", [videoFile, ...args], { stdio: "ignore" });
       child.unref();
 
       const [,] = await Promise.all([savePromise, closeMainWindow()]);
