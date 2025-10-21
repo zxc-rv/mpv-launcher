@@ -6,12 +6,12 @@ import {
   Toast,
   getPreferenceValues,
   LocalStorage,
-  popToRoot,
   closeMainWindow,
   Icon,
   confirmAlert,
   Alert,
   environment,
+  Keyboard,
 } from "@raycast/api";
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { readdir, rm, stat, mkdir } from "fs/promises";
@@ -789,33 +789,19 @@ export default function Command() {
             onAction={() => playMediaFolder(folder)}
             icon={Icon.Play}
           />
-        </ActionPanel.Section>
-        <ActionPanel.Section>
-          <Action
-            title="Обновить данные"
-            icon={Icon.ArrowClockwise}
-            onAction={() => forceRefresh()}
-            shortcut={{ modifiers: ["cmd"], key: "r" }}
-          />
-          <Action
-            title="Очистить миниатюры"
-            icon={Icon.Trash}
-            onAction={() => clearAllCache()}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
-          />
-        </ActionPanel.Section>
-        <ActionPanel.Section>
-          <Action.OpenInBrowser
+          <Action.Open
             title="Открыть директорию"
-            url={folder.path}
+            target={folder.path}
             icon={Icon.Folder}
           />
+        </ActionPanel.Section>
+        <ActionPanel.Section>
           <Action
             title="Удалить директорию"
             icon={Icon.Trash}
             style={Action.Style.Destructive}
             onAction={() => deleteMediaFolder(folder)}
-            shortcut={{ modifiers: ["ctrl"], key: "d" }}
+            shortcut={Keyboard.Shortcut.Common.Remove}
           />
         </ActionPanel.Section>
       </ActionPanel>
