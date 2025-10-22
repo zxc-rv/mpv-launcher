@@ -192,7 +192,7 @@ export default function Command() {
     );
   }
 
-  const handleItemVisible = useCallback(
+  const checkThumbnail = useCallback(
     async (path: string) => {
       if (thumbnails[path] || processingThumbnails.has(path)) return;
 
@@ -386,7 +386,7 @@ export default function Command() {
       isLastPlayed?: boolean;
     }) => {
       useEffect(() => {
-        if (!thumbnails[folder.path]) handleItemVisible(folder.path);
+        if (!thumbnails[folder.path]) checkThumbnail(folder.path);
       }, [folder.path]);
 
       const subtitle =
@@ -407,7 +407,7 @@ export default function Command() {
         />
       );
     },
-    [thumbnails, handleItemVisible, mediaActions],
+    [thumbnails, checkThumbnail, mediaActions],
   );
 
   return (
