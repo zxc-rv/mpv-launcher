@@ -167,21 +167,121 @@ class ThumbnailQueue {
 }
 
 const thumbnailQueue = new ThumbnailQueue();
+const firstVideoFileCache = new Map<
+  string,
+  { file: string | null; lastModified: number }
+>();
+
+// Добавляем интерфейс для кеша
+interface FirstVideoFileCache {
+  [path: string]: { file: string | null; lastModified: number };
+}
+
+const FIRST_VIDEO_CACHE_KEY = "first_video_cache_v1";
+
+// Функция для загрузки кеша из LocalStorage
+async function loadFirstVideoCache(): Promise<FirstVideoFileCache> {
+  try {
+    const cached = await LocalStorage.getItem<string>(FIRST_VIDEO_CACHE_KEY);
+    return cached ? JSON.parse(cached) : {};
+  } catch {
+    return {};
+  }
+}
+
+// Функция для сохранения кеша в LocalStorage
+async function saveFirstVideoCache(cache: FirstVideoFileCache): Promise<void> {
+  try {
+    // Ограничиваем размер кеша (сохраняем только последние 1000 записей)
+    const entries = Object.entries(cache);
+    const limitedCache = entries.slice(-1000).reduce((acc, [key, value]) => {
+      acc[key] = value;
+      return acc;
+    }, {} as FirstVideoFileCache);
+
+    await LocalStorage.setItem(
+      FIRST_VIDEO_CACHE_KEY,
+      JSON.stringify(limitedCache),
+    );
+  } catch (error) {
+    console.error("Error saving first video cache:", error);
+  }
+}
+
+// Глобальная переменная для хранения кеша в памяти (оптимизация)
+let memoryCache: FirstVideoFileCache = {};
 
 async function findFirstVideoFile(folderPath: string): Promise<string | null> {
   try {
+    const folderStat = await stat(folderPath);
+    const lastModified = folderStat.mtime.getTime();
+    const cached = memoryCache[folderPath];
+    if (cached && cached.lastModified === lastModified) {
+      return cached.file;
+    }
     const files = await readdir(folderPath);
     const videoFiles = files
       .filter((file) => /\.(mp4|mkv|avi|webm|mov|m4v|flv)$/i.test(file))
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    return videoFiles.length > 0 ? join(folderPath, videoFiles[0]) : null;
+    const result =
+      videoFiles.length > 0 ? join(folderPath, videoFiles[0]) : null;
+
+    memoryCache[folderPath] = { file: result, lastModified };
+
+    saveFirstVideoCache(memoryCache).catch(console.error);
+
+    return result;
   } catch (error) {
     console.error("Error finding video file:", error);
     return null;
   }
 }
 
-// Оптимизированный подсчет видеофайлов с кешированием
+async function prewarmFirstVideoFileCache(folders: MediaFolder[]) {
+  console.log("Pre-warming first video file cache...");
+
+  if (Object.keys(memoryCache).length === 0) {
+    memoryCache = await loadFirstVideoCache();
+    console.log(
+      `📦 Loaded cache from storage: ${Object.keys(memoryCache).length} entries`,
+    );
+  }
+
+  const BATCH_SIZE = 10;
+  let cacheHits = 0;
+  let cacheMisses = 0;
+
+  for (let i = 0; i < folders.length; i += BATCH_SIZE) {
+    const batch = folders.slice(i, i + BATCH_SIZE);
+
+    await Promise.allSettled(
+      batch.map(async (folder) => {
+        try {
+          const hasCache = memoryCache[folder.path] !== undefined;
+          await findFirstVideoFile(folder.path);
+
+          if (hasCache) {
+            cacheHits++;
+          } else {
+            cacheMisses++;
+          }
+        } catch (error) {
+          console.error(`Error pre-warming ${folder.path}:`, error);
+          cacheMisses++;
+        }
+      }),
+    );
+
+    if (i + BATCH_SIZE < folders.length) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  console.log(`🎯 Cache stats - Hits: ${cacheHits}, Misses: ${cacheMisses}`);
+  console.log(`💾 Final memory cache size: ${Object.keys(memoryCache).length}`);
+  console.log("✅ Cache pre-warming complete");
+}
+
 const videoCountCache = new Map<
   string,
   { count: number; lastModified: number }
@@ -270,6 +370,9 @@ export default function Command() {
       await mkdir(thumbnailCachePath, { recursive: true });
 
       try {
+        await loadFirstVideoCache().then((cache) => {
+          memoryCache = cache;
+        });
         const [lastPlayedJson, thumbnailsJson] = await Promise.all([
           LocalStorage.getItem<string>(LAST_PLAYED_KEY),
           LocalStorage.getItem<string>(THUMBNAILS_CACHE_KEY),
@@ -501,96 +604,6 @@ export default function Command() {
     );
   }
 
-  async function loadMediaFolders() {
-    try {
-      await refreshFolders();
-    } catch (error) {
-      console.error("Error loading folders:", error);
-      setIsLoading(false);
-    }
-  }
-
-  async function refreshFolders() {
-    try {
-      setIsRefreshing(true);
-      const freshFolders = await loadFreshFolders();
-      setFolders(freshFolders);
-      // НЕ меняем isLoading здесь, чтобы избежать мигания
-    } catch (error) {
-      console.error("Error refreshing folders:", error);
-    } finally {
-      setIsRefreshing(false);
-    }
-  }
-
-  async function forceRefresh() {
-    try {
-      setIsRefreshing(true);
-
-      // Загружаем свежие данные
-      const freshFolders = await loadFreshFolders();
-
-      if (freshFolders.length > 0) {
-        setFolders(freshFolders);
-        setHasInitialData(true);
-
-        showToast({
-          style: Toast.Style.Success,
-          title: "Данные обновлены",
-          message: `Загружено ${freshFolders.length} папок`,
-        });
-      } else {
-        showToast({
-          style: Toast.Style.Failure,
-          title: "Ошибка обновления",
-          message: "Папки не найдены",
-        });
-      }
-    } catch (error) {
-      console.error("Force refresh failed:", error);
-      showToast({
-        style: Toast.Style.Failure,
-        title: "Ошибка обновления",
-        message: error instanceof Error ? error.message : "Неизвестная ошибка",
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
-  }
-
-  async function clearAllCache() {
-    try {
-      await LocalStorage.removeItem(THUMBNAILS_CACHE_KEY);
-
-      // Сбрасываем состояние
-      setThumbnails({});
-      setFolders([]);
-      setHasInitialData(false);
-      setIsLoading(true);
-
-      // Перезагружаем
-      setTimeout(async () => {
-        const freshFolders = await loadFreshFolders();
-        setFolders(freshFolders);
-        setHasInitialData(true);
-        setIsLoading(false);
-      }, 100);
-
-      showToast({
-        style: Toast.Style.Success,
-        title: "Кеш очищен",
-        message: "Миниатюры удалены, папки перезагружены",
-      });
-    } catch (error) {
-      console.error("Clear cache failed:", error);
-      showToast({
-        style: Toast.Style.Failure,
-        title: "Ошибка очистки",
-        message: error instanceof Error ? error.message : "Неизвестная ошибка",
-      });
-    }
-  }
-
   async function refreshFoldersSilent() {
     try {
       const freshFolders = await loadFreshFolders();
@@ -599,6 +612,7 @@ export default function Command() {
         setFolders(freshFolders);
         setHasInitialData(true);
         await syncLastPlayedWithFolders();
+        prewarmFirstVideoFileCache(freshFolders);
       }
     } catch (error) {
       console.error("Error refreshing folders:", error);
@@ -645,30 +659,25 @@ export default function Command() {
     [thumbnails],
   );
 
-  async function playMediaFolder(folder: MediaFolder) {
-    const savePromise = saveLastPlayed(folder);
-
+  async function play(folder: MediaFolder) {
     try {
       const videoFile = await findFirstVideoFile(folder.path);
       if (!videoFile) throw new Error("No video files found in folder");
 
-      let args: string[] = [];
-      if (folder.type === "anime") {
-        args = animeArguments ? animeArguments.split(" ").filter(Boolean) : [];
-      } else if (folder.type === "film") {
-        args = filmsArguments ? filmsArguments.split(" ").filter(Boolean) : [];
-      } else if (folder.type === "series") {
-        args = seriesArguments
-          ? seriesArguments.split(" ").filter(Boolean)
-          : [];
-      }
+      const argsMap = {
+        anime: animeArguments,
+        film: filmsArguments,
+        series: seriesArguments,
+      };
 
-      const child = spawn("mpv", [videoFile, ...args], { stdio: "ignore" });
-      child.unref();
+      const argsString = argsMap[folder.type] || "";
+      const args = argsString.split(" ").filter(Boolean);
 
-      const [,] = await Promise.all([savePromise, closeMainWindow()]);
+      spawn("mpv", [videoFile, ...args], { stdio: "ignore" }).unref();
+
+      closeMainWindow();
+      saveLastPlayed(folder);
     } catch (error) {
-      await savePromise;
       showToast({
         style: Toast.Style.Failure,
         title: "Error preparing to play video",
@@ -786,7 +795,7 @@ export default function Command() {
         <ActionPanel.Section>
           <Action
             title={isLastPlayed ? "Продолжить просмотр" : "Начать просмотр"}
-            onAction={() => playMediaFolder(folder)}
+            onAction={() => play(folder)}
             icon={Icon.Play}
           />
           <Action.Open
