@@ -58,7 +58,7 @@ export default function Command() {
     seriesArguments,
   } = getPreferenceValues<Settings>();
 
-  const [folders, setFolders] = useState<TitleFolder[]>([]);
+  const [titles, setTitles] = useState<TitleFolder[]>([]);
   const [lastPlayed, setLastPlayed] = useState<TitleFolder[]>([]);
   const [thumbnails, setThumbnails] = useState<
     Record<string, ThumbnailsCacheEntry>
@@ -66,27 +66,27 @@ export default function Command() {
   const [searchText, setSearchText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  const filteredFolders = useMemo(() => {
-    let filtered = folders;
+  const filteredtitles = useMemo(() => {
+    let filtered = titles;
 
     if (searchText) {
       const searchLower = searchText.toLowerCase();
-      filtered = folders.filter((folder) =>
-        folder.name.toLowerCase().includes(searchLower),
+      filtered = titles.filter((title) =>
+        title.name.toLowerCase().includes(searchLower),
       );
     }
 
     return filtered.reduce(
-      (acc, folder) => {
-        if (!acc[folder.type]) acc[folder.type] = [];
-        acc[folder.type].push(folder);
+      (acc, title) => {
+        if (!acc[title.type]) acc[title.type] = [];
+        acc[title.type].push(title);
         return acc;
       },
       {} as Record<string, TitleFolder[]>,
     );
-  }, [folders, searchText]);
+  }, [titles, searchText]);
 
-  const titlePaths = new Set(folders.map((f) => f.path));
+  const titlePaths = new Set(titles.map((f) => f.path));
   const sortedLastPlayed = lastPlayed.filter((item) =>
     titlePaths.has(item.path),
   );
@@ -121,8 +121,8 @@ export default function Command() {
         setThumbnails(validThumbnails);
       }
 
-      const freshFolders = await loadFreshFolders();
-      setFolders(freshFolders);
+      const titles = await loadTitles();
+      setTitles(titles);
       setIsLoading(false);
     })();
   }, []);
@@ -136,10 +136,10 @@ export default function Command() {
     );
   }
 
-  async function saveLastPlayed(folder: TitleFolder) {
+  async function saveLastPlayed(title: TitleFolder) {
     const updatedLastPlayed = [
-      folder,
-      ...lastPlayed.filter((item) => item.path !== folder.path),
+      title,
+      ...lastPlayed.filter((item) => item.path !== title.path),
     ].slice(0, 5);
 
     await LocalStorage.setItem(
@@ -149,49 +149,42 @@ export default function Command() {
     setLastPlayed(updatedLastPlayed);
   }
 
-  async function loadFoldersFromDirectory(
-    directory: string,
-    type: "anime" | "film" | "series",
-  ): Promise<TitleFolder[]> {
-    try {
-      const items = await readdir(directory, { withFileTypes: true });
-      const directories = items.filter((item) => item.isDirectory());
-
-      const folders = await Promise.all(
-        directories.map(async (dir) => {
-          const titlePath = join(directory, dir.name);
-          const titleInfo = await getTitleInfo(titlePath);
-
-          return {
-            name: dir.name,
-            path: titlePath,
-            type,
-            seriesCount: titleInfo.count,
-          };
-        }),
-      );
-
-      return folders;
-    } catch (error) {
-      showToast({
-        style: Toast.Style.Failure,
-        title: `Error loading ${type} folders`,
-        message: `Make sure the directory "${directory}" exists`,
-      });
-      return [];
-    }
-  }
-
-  async function loadFreshFolders(): Promise<TitleFolder[]> {
-    const [animeFolders, filmFolders, seriesFolders] = await Promise.all([
-      loadFoldersFromDirectory(animeDirectory, "anime"),
-      loadFoldersFromDirectory(seriesDirectory, "series"),
-      loadFoldersFromDirectory(filmsDirectory, "film"),
-    ]);
-
-    return [...animeFolders, ...filmFolders, ...seriesFolders].sort((a, b) =>
-      a.name.localeCompare(b.name, "ru", { numeric: true }),
+  async function loadTitles(): Promise<TitleFolder[]> {
+    const directories = [
+      { path: animeDirectory, type: "anime" as const },
+      { path: seriesDirectory, type: "series" as const },
+      { path: filmsDirectory, type: "film" as const },
+    ];
+    const results = await Promise.all(
+      directories.map(async ({ path, type }) => {
+        try {
+          const items = await readdir(path, { withFileTypes: true });
+          const dirs = items.filter((item) => item.isDirectory());
+          return await Promise.all(
+            dirs.map(async (dir) => {
+              const titlePath = join(path, dir.name);
+              const titleInfo = await getTitleInfo(titlePath);
+              return {
+                name: dir.name,
+                path: titlePath,
+                type,
+                seriesCount: titleInfo.count,
+              };
+            }),
+          );
+        } catch (error) {
+          showToast({
+            style: Toast.Style.Failure,
+            title: `Error loading ${type} titles`,
+            message: `Make sure the directory "${path}" exists`,
+          });
+          return [];
+        }
+      }),
     );
+    return results
+      .flat()
+      .sort((a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }));
   }
 
   const checkThumbnail = useCallback(
@@ -208,10 +201,8 @@ export default function Command() {
         }
         return;
       }
-
       const fileHash = createHash("md5").update(titleInfo.file).digest("hex");
       const cached = thumbnails[path];
-
       if (
         cached &&
         cached.fileHash === fileHash &&
@@ -219,19 +210,16 @@ export default function Command() {
       ) {
         return;
       }
-
       if (processingThumbnails.has(path) || activeGenerations >= 3) return;
 
       if (cached?.thumbnailPath && existsSync(cached.thumbnailPath)) {
         await rm(cached.thumbnailPath).catch(console.error);
       }
-
       processingThumbnails.add(path);
       activeGenerations++;
 
       const hash = createHash("md5").update(titleInfo.file).digest("hex");
       const thumbnailPath = join(thumbnailCachePath, `${hash}.jpg`);
-
       if (existsSync(thumbnailPath)) {
         setThumbnails((prev) => {
           if (
@@ -248,7 +236,6 @@ export default function Command() {
         activeGenerations--;
         return;
       }
-
       try {
         await generateThumbnail(titleInfo.file, thumbnailPath);
         setThumbnails((prev) => {
@@ -272,22 +259,22 @@ export default function Command() {
     [thumbnails],
   );
 
-  async function play(folder: TitleFolder) {
+  async function play(title: TitleFolder) {
     try {
-      const titleInfo = await getTitleInfo(folder.path);
+      const titleInfo = await getTitleInfo(title.path);
       if (!titleInfo.file) throw new Error("No video found");
       const argsMap = {
         anime: animeArguments,
         series: seriesArguments,
         film: filmsArguments,
       };
-      const argsString = argsMap[folder.type] || "";
+      const argsString = argsMap[title.type] || "";
       const args = argsString.split(" ").filter(Boolean);
 
-      console.log(`[PLAY] Launching mpv with: ${titleInfo.file}`);
+      //console.log(`[PLAY] Launching mpv with: ${titleInfo.file}`);
       spawn("mpv", [titleInfo.file, ...args], { stdio: "ignore" }).unref();
       closeMainWindow();
-      saveLastPlayed(folder);
+      saveLastPlayed(title);
     } catch (error) {
       showToast({
         style: Toast.Style.Failure,
@@ -307,10 +294,10 @@ export default function Command() {
     return `${count} ${forms[pluralRules.select(count)]}`;
   }
 
-  async function deleteTitleFolder(folder: TitleFolder) {
+  async function deleteTitleFolder(title: TitleFolder) {
     if (
       await confirmAlert({
-        title: `Delete "${folder.name}"?`,
+        title: `Delete "${title.name}"?`,
         message: "This action is permanent and cannot be undone.",
         icon: Icon.Trash,
         primaryAction: {
@@ -320,19 +307,19 @@ export default function Command() {
       })
     ) {
       try {
-        await rm(folder.path, { recursive: true, force: true });
+        await rm(title.path, { recursive: true, force: true });
         showToast({
           style: Toast.Style.Success,
           title: "Folder Deleted",
-          message: `Removed "${folder.name}"`,
+          message: `Removed "${title.name}"`,
         });
 
-        const updatedFolders = folders.filter((f) => f.path !== folder.path);
+        const updatedtitles = titles.filter((f) => f.path !== title.path);
         const updatedLastPlayed = lastPlayed.filter(
-          (item) => item.path !== folder.path,
+          (item) => item.path !== title.path,
         );
 
-        setFolders(updatedFolders);
+        setTitles(updatedtitles);
         setLastPlayed(updatedLastPlayed);
 
         await LocalStorage.setItem(
@@ -340,14 +327,14 @@ export default function Command() {
           JSON.stringify(updatedLastPlayed),
         );
 
-        const cached = thumbnails[folder.path];
+        const cached = thumbnails[title.path];
         if (cached?.thumbnailPath && existsSync(cached.thumbnailPath)) {
           await rm(cached.thumbnailPath).catch(console.error);
         }
 
         setThumbnails((prev) => {
           const updated = { ...prev };
-          delete updated[folder.path];
+          delete updated[title.path];
           saveThumbnailsCache(updated);
           return updated;
         });
@@ -362,17 +349,17 @@ export default function Command() {
   }
 
   const titleActions = useCallback(
-    (folder: TitleFolder, isLastPlayed = false) => (
+    (title: TitleFolder, isLastPlayed = false) => (
       <ActionPanel>
         <ActionPanel.Section>
           <Action
             title={isLastPlayed ? "Продолжить просмотр" : "Начать просмотр"}
-            onAction={() => play(folder)}
+            onAction={() => play(title)}
             icon={Icon.Play}
           />
           <Action.Open
             title="Открыть директорию"
-            target={folder.path}
+            target={title.path}
             icon={Icon.Folder}
           />
         </ActionPanel.Section>
@@ -381,13 +368,13 @@ export default function Command() {
             title="Удалить директорию"
             icon={Icon.Trash}
             style={Action.Style.Destructive}
-            onAction={() => deleteTitleFolder(folder)}
+            onAction={() => deleteTitleFolder(title)}
             shortcut={Keyboard.Shortcut.Common.Remove}
           />
         </ActionPanel.Section>
       </ActionPanel>
     ),
-    [folders, lastPlayed],
+    [titles, lastPlayed],
   );
 
   const typeDisplayNames = {
@@ -405,31 +392,31 @@ export default function Command() {
 
   const GridItemWithLazyThumbnail = useCallback(
     ({
-      folder,
+      title,
       isLastPlayed = false,
     }: {
-      folder: TitleFolder;
+      title: TitleFolder;
       isLastPlayed?: boolean;
     }) => {
       useEffect(() => {
-        checkThumbnail(folder.path);
-      }, [folder.path]);
+        checkThumbnail(title.path);
+      }, [title.path]);
 
       const subtitle =
-        folder.type !== "film"
-          ? formatSeriesCount(folder.seriesCount)
+        title.type !== "film"
+          ? formatSeriesCount(title.seriesCount)
           : undefined;
-      const content = thumbnails[folder.path]?.thumbnailPath
-        ? `file://${thumbnails[folder.path].thumbnailPath}`
-        : getIconForType(folder.type);
+      const content = thumbnails[title.path]?.thumbnailPath
+        ? `file://${thumbnails[title.path].thumbnailPath}`
+        : getIconForType(title.type);
 
       return (
         <Grid.Item
-          key={folder.path}
-          title={folder.name}
+          key={title.path}
+          title={title.name}
           subtitle={subtitle}
           content={content}
-          actions={titleActions(folder, isLastPlayed)}
+          actions={titleActions(title, isLastPlayed)}
         />
       );
     },
@@ -450,13 +437,13 @@ export default function Command() {
       {sortedLastPlayed.length > 0 && !searchText && (
         <Grid.Section title="Продолжить просмотр">
           {sortedLastPlayed.map((item) => {
-            const actualFolder = folders.find((f) => f.path === item.path);
-            if (!actualFolder) return null;
+            const actualTitle = titles.find((f) => f.path === item.path);
+            if (!actualTitle) return null;
 
             return (
               <GridItemWithLazyThumbnail
                 key={item.path}
-                folder={actualFolder}
+                title={actualTitle}
                 isLastPlayed={true}
               />
             );
@@ -464,12 +451,12 @@ export default function Command() {
         </Grid.Section>
       )}
       {(["anime", "series", "film"] as const).map((type) => {
-        const typeFolders = filteredFolders[type] || [];
-        if (typeFolders.length === 0) return null;
+        const typetitles = filteredtitles[type] || [];
+        if (typetitles.length === 0) return null;
         return (
           <Grid.Section key={type} title={typeDisplayNames[type]}>
-            {typeFolders.map((folder) => (
-              <GridItemWithLazyThumbnail key={folder.path} folder={folder} />
+            {typetitles.map((title) => (
+              <GridItemWithLazyThumbnail key={title.path} title={title} />
             ))}
           </Grid.Section>
         );
