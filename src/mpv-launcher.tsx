@@ -36,6 +36,11 @@ interface TitleFolder {
   seriesCount: number;
 }
 
+interface ThumbnailsCacheEntry {
+  thumbnailPath: string;
+  fileHash: string;
+}
+
 const pluralRules = new Intl.PluralRules("ru");
 const LAST_PLAYED_KEY = "last_played_media_v4";
 const THUMBNAILS_CACHE_KEY = "thumbnails_cache_v1";
@@ -55,9 +60,12 @@ export default function Command() {
 
   const [folders, setFolders] = useState<TitleFolder[]>([]);
   const [lastPlayed, setLastPlayed] = useState<TitleFolder[]>([]);
-  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const [thumbnails, setThumbnails] = useState<
+    Record<string, ThumbnailsCacheEntry>
+  >({});
   const [searchText, setSearchText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+
   const filteredFolders = useMemo(() => {
     let filtered = folders;
 
@@ -95,13 +103,20 @@ export default function Command() {
       if (lastPlayedJson) setLastPlayed(JSON.parse(lastPlayedJson));
       if (thumbnailsJson) {
         const cache = JSON.parse(thumbnailsJson);
-        const validThumbnails: Record<string, string> = {};
+        const validThumbnails: Record<string, ThumbnailsCacheEntry> = {};
 
-        Object.entries(cache.thumbnails).forEach(([path, thumbPath]) => {
-          if (existsSync(thumbPath as string)) {
-            validThumbnails[path] = thumbPath as string;
+        for (const [path, entry] of Object.entries(cache.thumbnails)) {
+          if (typeof entry === "string") {
+            if (existsSync(entry)) {
+              validThumbnails[path] = { thumbnailPath: entry, fileHash: "" };
+            }
+          } else {
+            const e = entry as ThumbnailsCacheEntry;
+            if (existsSync(e.thumbnailPath)) {
+              validThumbnails[path] = e;
+            }
           }
-        });
+        }
 
         setThumbnails(validThumbnails);
       }
@@ -112,7 +127,9 @@ export default function Command() {
     })();
   }, []);
 
-  async function saveThumbnailsCache(thumbnailsData: Record<string, string>) {
+  async function saveThumbnailsCache(
+    thumbnailsData: Record<string, ThumbnailsCacheEntry>,
+  ) {
     await LocalStorage.setItem(
       THUMBNAILS_CACHE_KEY,
       JSON.stringify({ thumbnails: thumbnailsData, lastUpdated: Date.now() }),
@@ -179,29 +196,51 @@ export default function Command() {
 
   const checkThumbnail = useCallback(
     async (path: string) => {
-      if (thumbnails[path] || processingThumbnails.has(path)) return;
-
-      if (activeGenerations >= 3) {
-        console.log("[THUMBNAIL] Queue full, skipping:", path);
+      const titleInfo = await getTitleInfo(path);
+      if (!titleInfo.file) {
+        if (thumbnails[path]) {
+          setThumbnails((prev) => {
+            const updated = { ...prev };
+            delete updated[path];
+            saveThumbnailsCache(updated);
+            return updated;
+          });
+        }
         return;
+      }
+
+      const fileHash = createHash("md5").update(titleInfo.file).digest("hex");
+      const cached = thumbnails[path];
+
+      if (
+        cached &&
+        cached.fileHash === fileHash &&
+        existsSync(cached.thumbnailPath)
+      ) {
+        return;
+      }
+
+      if (processingThumbnails.has(path) || activeGenerations >= 3) return;
+
+      if (cached?.thumbnailPath && existsSync(cached.thumbnailPath)) {
+        await rm(cached.thumbnailPath).catch(console.error);
       }
 
       processingThumbnails.add(path);
       activeGenerations++;
-
-      const titleInfo = await getTitleInfo(path);
-      if (!titleInfo.file) {
-        processingThumbnails.delete(path);
-        activeGenerations--;
-        return;
-      }
 
       const hash = createHash("md5").update(titleInfo.file).digest("hex");
       const thumbnailPath = join(thumbnailCachePath, `${hash}.jpg`);
 
       if (existsSync(thumbnailPath)) {
         setThumbnails((prev) => {
-          const updated = { ...prev, [path]: thumbnailPath };
+          if (
+            prev[path]?.thumbnailPath === thumbnailPath &&
+            prev[path]?.fileHash === fileHash
+          ) {
+            return prev;
+          }
+          const updated = { ...prev, [path]: { thumbnailPath, fileHash } };
           saveThumbnailsCache(updated);
           return updated;
         });
@@ -213,7 +252,13 @@ export default function Command() {
       try {
         await generateThumbnail(titleInfo.file, thumbnailPath);
         setThumbnails((prev) => {
-          const updated = { ...prev, [path]: thumbnailPath };
+          if (
+            prev[path]?.thumbnailPath === thumbnailPath &&
+            prev[path]?.fileHash === fileHash
+          ) {
+            return prev;
+          }
+          const updated = { ...prev, [path]: { thumbnailPath, fileHash } };
           saveThumbnailsCache(updated);
           return updated;
         });
@@ -295,17 +340,17 @@ export default function Command() {
           JSON.stringify(updatedLastPlayed),
         );
 
+        const cached = thumbnails[folder.path];
+        if (cached?.thumbnailPath && existsSync(cached.thumbnailPath)) {
+          await rm(cached.thumbnailPath).catch(console.error);
+        }
+
         setThumbnails((prev) => {
           const updated = { ...prev };
           delete updated[folder.path];
           saveThumbnailsCache(updated);
           return updated;
         });
-
-        const thumbnailPath = thumbnails[folder.path];
-        if (thumbnailPath && existsSync(thumbnailPath)) {
-          await rm(thumbnailPath).catch(console.error);
-        }
       } catch (error) {
         showToast({
           style: Toast.Style.Failure,
@@ -367,15 +412,15 @@ export default function Command() {
       isLastPlayed?: boolean;
     }) => {
       useEffect(() => {
-        if (!thumbnails[folder.path]) checkThumbnail(folder.path);
+        checkThumbnail(folder.path);
       }, [folder.path]);
 
       const subtitle =
         folder.type !== "film"
           ? formatSeriesCount(folder.seriesCount)
           : undefined;
-      const content = thumbnails[folder.path]
-        ? `file://${thumbnails[folder.path]}`
+      const content = thumbnails[folder.path]?.thumbnailPath
+        ? `file://${thumbnails[folder.path].thumbnailPath}`
         : getIconForType(folder.type);
 
       return (
@@ -439,7 +484,6 @@ async function getTitleInfo(path: string) {
     const re = /\.(mp4|mkv|avi|webm|mov|m4v|flv)$/i;
     let first: string | null = null;
     let count = 0;
-
     for (const f of files) {
       if (!re.test(f)) continue;
       count++;
@@ -448,7 +492,6 @@ async function getTitleInfo(path: string) {
         first = f;
       }
     }
-
     return {
       file: first ? join(path, first) : null,
       count,
