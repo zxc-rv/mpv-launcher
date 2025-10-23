@@ -20,7 +20,7 @@ import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { createHash } from "crypto";
 
-interface Preferences {
+interface Settings {
   animeDirectory: string;
   filmsDirectory: string;
   seriesDirectory: string;
@@ -29,23 +29,18 @@ interface Preferences {
   seriesArguments: string;
 }
 
-interface MediaFolder {
+interface TitleFolder {
   name: string;
   path: string;
   type: "anime" | "series" | "film";
   seriesCount: number;
 }
 
-interface LastPlayedMedia extends MediaFolder {
-  id: string;
-  lastPlayedAt: number;
-}
-
-const LAST_PLAYED_KEY = "last_played_media_v3";
+const pluralRules = new Intl.PluralRules("ru");
+const LAST_PLAYED_KEY = "last_played_media_v4";
 const THUMBNAILS_CACHE_KEY = "thumbnails_cache_v1";
-const thumbnailCachePath = join(environment.supportPath, "thumbnails");
 const processingThumbnails = new Set<string>();
-const videoCache = new Map<string, { file: string | null; count: number }>();
+const thumbnailCachePath = join(environment.supportPath, "thumbnails");
 let activeGenerations = 0;
 
 export default function Command() {
@@ -56,20 +51,18 @@ export default function Command() {
     animeArguments,
     filmsArguments,
     seriesArguments,
-  } = getPreferenceValues<Preferences>();
+  } = getPreferenceValues<Settings>();
 
-  const [folders, setFolders] = useState<MediaFolder[]>([]);
-  const [lastPlayed, setLastPlayed] = useState<LastPlayedMedia[]>([]);
+  const [folders, setFolders] = useState<TitleFolder[]>([]);
+  const [lastPlayed, setLastPlayed] = useState<TitleFolder[]>([]);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [searchText, setSearchText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const debouncedSearch = useDebounce(searchText, 50);
-
   const filteredFolders = useMemo(() => {
     let filtered = folders;
 
-    if (debouncedSearch) {
-      const searchLower = debouncedSearch.toLowerCase();
+    if (searchText) {
+      const searchLower = searchText.toLowerCase();
       filtered = folders.filter((folder) =>
         folder.name.toLowerCase().includes(searchLower),
       );
@@ -81,16 +74,14 @@ export default function Command() {
         acc[folder.type].push(folder);
         return acc;
       },
-      {} as Record<string, MediaFolder[]>,
+      {} as Record<string, TitleFolder[]>,
     );
-  }, [folders, debouncedSearch]);
+  }, [folders, searchText]);
 
-  const sortedLastPlayed = useMemo(() => {
-    return lastPlayed
-      .filter((item) => folders.some((f) => f.path === item.path))
-      .sort((a, b) => b.lastPlayedAt - a.lastPlayedAt)
-      .slice(0, 5);
-  }, [lastPlayed, folders]);
+  const titlePaths = new Set(folders.map((f) => f.path));
+  const sortedLastPlayed = lastPlayed.filter((item) =>
+    titlePaths.has(item.path),
+  );
 
   useEffect(() => {
     (async () => {
@@ -128,15 +119,9 @@ export default function Command() {
     );
   }
 
-  async function saveLastPlayed(folder: MediaFolder) {
-    const newItem: LastPlayedMedia = {
-      ...folder,
-      id: `${folder.path}-${Date.now()}`,
-      lastPlayedAt: Date.now(),
-    };
-
+  async function saveLastPlayed(folder: TitleFolder) {
     const updatedLastPlayed = [
-      newItem,
+      folder,
       ...lastPlayed.filter((item) => item.path !== folder.path),
     ].slice(0, 5);
 
@@ -150,21 +135,21 @@ export default function Command() {
   async function loadFoldersFromDirectory(
     directory: string,
     type: "anime" | "film" | "series",
-  ): Promise<MediaFolder[]> {
+  ): Promise<TitleFolder[]> {
     try {
       const items = await readdir(directory, { withFileTypes: true });
       const directories = items.filter((item) => item.isDirectory());
 
       const folders = await Promise.all(
         directories.map(async (dir) => {
-          const folderPath = join(directory, dir.name);
-          const folderInfo = await getFolderInfo(folderPath);
+          const titlePath = join(directory, dir.name);
+          const titleInfo = await getTitleInfo(titlePath);
 
           return {
             name: dir.name,
-            path: folderPath,
+            path: titlePath,
             type,
-            seriesCount: folderInfo.count,
+            seriesCount: titleInfo.count,
           };
         }),
       );
@@ -180,7 +165,7 @@ export default function Command() {
     }
   }
 
-  async function loadFreshFolders(): Promise<MediaFolder[]> {
+  async function loadFreshFolders(): Promise<TitleFolder[]> {
     const [animeFolders, filmFolders, seriesFolders] = await Promise.all([
       loadFoldersFromDirectory(animeDirectory, "anime"),
       loadFoldersFromDirectory(seriesDirectory, "series"),
@@ -204,14 +189,14 @@ export default function Command() {
       processingThumbnails.add(path);
       activeGenerations++;
 
-      const folderInfo = await getFolderInfo(path);
-      if (!folderInfo.file) {
+      const titleInfo = await getTitleInfo(path);
+      if (!titleInfo.file) {
         processingThumbnails.delete(path);
         activeGenerations--;
         return;
       }
 
-      const hash = createHash("md5").update(folderInfo.file).digest("hex");
+      const hash = createHash("md5").update(titleInfo.file).digest("hex");
       const thumbnailPath = join(thumbnailCachePath, `${hash}.jpg`);
 
       if (existsSync(thumbnailPath)) {
@@ -226,7 +211,7 @@ export default function Command() {
       }
 
       try {
-        await generateThumbnail(folderInfo.file, thumbnailPath);
+        await generateThumbnail(titleInfo.file, thumbnailPath);
         setThumbnails((prev) => {
           const updated = { ...prev, [path]: thumbnailPath };
           saveThumbnailsCache(updated);
@@ -242,46 +227,42 @@ export default function Command() {
     [thumbnails],
   );
 
-  async function play(folder: MediaFolder) {
+  async function play(folder: TitleFolder) {
     try {
-      const folderInfo = await getFolderInfo(folder.path);
-      if (!folderInfo.file) throw new Error("No video files found in folder");
-
+      const titleInfo = await getTitleInfo(folder.path);
+      if (!titleInfo.file) throw new Error("No video found");
       const argsMap = {
         anime: animeArguments,
-        film: filmsArguments,
         series: seriesArguments,
+        film: filmsArguments,
       };
-
       const argsString = argsMap[folder.type] || "";
       const args = argsString.split(" ").filter(Boolean);
 
-      console.log(`[PLAY] Launching mpv with: ${folderInfo.file}`);
-      spawn("mpv", [folderInfo.file, ...args], { stdio: "ignore" }).unref();
-
-      await saveLastPlayed(folder);
-      await closeMainWindow();
+      console.log(`[PLAY] Launching mpv with: ${titleInfo.file}`);
+      spawn("mpv", [titleInfo.file, ...args], { stdio: "ignore" }).unref();
+      closeMainWindow();
+      saveLastPlayed(folder);
     } catch (error) {
       showToast({
         style: Toast.Style.Failure,
-        title: "Error preparing to play video",
+        title: "Error",
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }
   }
 
   function formatSeriesCount(count: number): string {
-    const forms = ["серия", "серии", "серий"];
-    const n = Math.abs(count) % 100;
-    const n1 = n % 10;
-    let form = forms[2];
-    if (n > 10 && n < 20) form = forms[2];
-    else if (n1 > 1 && n1 < 5) form = forms[1];
-    else if (n1 === 1) form = forms[0];
-    return `${count} ${form}`;
+    const forms: Record<string, string> = {
+      one: "серия",
+      few: "серии",
+      many: "серий",
+      other: "серий",
+    };
+    return `${count} ${forms[pluralRules.select(count)]}`;
   }
 
-  async function deleteMediaFolder(folder: MediaFolder) {
+  async function deleteTitleFolder(folder: TitleFolder) {
     if (
       await confirmAlert({
         title: `Delete "${folder.name}"?`,
@@ -335,8 +316,8 @@ export default function Command() {
     }
   }
 
-  const mediaActions = useCallback(
-    (folder: MediaFolder, isLastPlayed = false) => (
+  const titleActions = useCallback(
+    (folder: TitleFolder, isLastPlayed = false) => (
       <ActionPanel>
         <ActionPanel.Section>
           <Action
@@ -355,7 +336,7 @@ export default function Command() {
             title="Удалить директорию"
             icon={Icon.Trash}
             style={Action.Style.Destructive}
-            onAction={() => deleteMediaFolder(folder)}
+            onAction={() => deleteTitleFolder(folder)}
             shortcut={Keyboard.Shortcut.Common.Remove}
           />
         </ActionPanel.Section>
@@ -370,7 +351,7 @@ export default function Command() {
     film: "Фильмы",
   };
 
-  const getIconForType = (type: MediaFolder["type"]) => {
+  const getIconForType = (type: TitleFolder["type"]) => {
     if (type === "anime") return "🎌";
     if (type === "series") return "📺";
     if (type === "film") return "🎬";
@@ -382,7 +363,7 @@ export default function Command() {
       folder,
       isLastPlayed = false,
     }: {
-      folder: MediaFolder | LastPlayedMedia;
+      folder: TitleFolder;
       isLastPlayed?: boolean;
     }) => {
       useEffect(() => {
@@ -399,15 +380,15 @@ export default function Command() {
 
       return (
         <Grid.Item
-          key={isLastPlayed ? (folder as LastPlayedMedia).id : folder.path}
+          key={folder.path}
           title={folder.name}
           subtitle={subtitle}
           content={content}
-          actions={mediaActions(folder, isLastPlayed)}
+          actions={titleActions(folder, isLastPlayed)}
         />
       );
     },
-    [thumbnails, checkThumbnail, mediaActions],
+    [thumbnails, checkThumbnail, titleActions],
   );
 
   return (
@@ -415,27 +396,22 @@ export default function Command() {
       fit={Grid.Fit.Fill}
       aspectRatio="4/3"
       isLoading={isLoading}
-      searchBarPlaceholder="Поиск тайтлов..."
+      searchBarPlaceholder="Поиск..."
       columns={5}
       onSearchTextChange={setSearchText}
       searchText={searchText}
       navigationTitle="MPV Launcher"
     >
-      {sortedLastPlayed.length > 0 && !debouncedSearch && (
+      {sortedLastPlayed.length > 0 && !searchText && (
         <Grid.Section title="Продолжить просмотр">
           {sortedLastPlayed.map((item) => {
             const actualFolder = folders.find((f) => f.path === item.path);
             if (!actualFolder) return null;
 
-            const folderWithLastPlayedData = {
-              ...actualFolder,
-              id: item.id,
-              lastPlayedAt: item.lastPlayedAt,
-            };
             return (
               <GridItemWithLazyThumbnail
-                key={item.id}
-                folder={folderWithLastPlayedData}
+                key={item.path}
+                folder={actualFolder}
                 isLastPlayed={true}
               />
             );
@@ -457,35 +433,27 @@ export default function Command() {
   );
 }
 
-function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(handler);
-  }, [value, delay]);
-
-  return debouncedValue;
-}
-
-async function getFolderInfo(
-  path: string,
-): Promise<{ file: string | null; count: number }> {
-  if (videoCache.has(path)) return videoCache.get(path)!;
-
+async function getTitleInfo(path: string) {
   try {
     const files = await readdir(path);
-    const videoFiles = files
-      .filter((f) => /\.(mp4|mkv|avi|webm|mov|m4v|flv)$/i.test(f))
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const re = /\.(mp4|mkv|avi|webm|mov|m4v|flv)$/i;
+    let first: string | null = null;
+    let count = 0;
 
-    const file = videoFiles[0] ? join(path, videoFiles[0]) : null;
-    const count = videoFiles.length;
-    const result = { file, count };
+    for (const f of files) {
+      if (!re.test(f)) continue;
+      count++;
+      if (!first) first = f;
+      else if (f.localeCompare(first, undefined, { numeric: true }) < 0) {
+        first = f;
+      }
+    }
 
-    videoCache.set(path, result);
-    return result;
-  } catch (error) {
+    return {
+      file: first ? join(path, first) : null,
+      count,
+    };
+  } catch {
     return { file: null, count: 0 };
   }
 }
