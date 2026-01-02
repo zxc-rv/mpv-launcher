@@ -18,7 +18,6 @@ import { join } from "path";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { createHash } from "crypto";
-import { homedir } from "os";
 import { writeFile } from "fs/promises";
 
 interface Settings {
@@ -173,7 +172,7 @@ export default function Command() {
               };
             }),
           );
-        } catch (error) {
+        } catch {
           showToast({
             style: Toast.Style.Failure,
             title: `Error loading ${type} titles`,
