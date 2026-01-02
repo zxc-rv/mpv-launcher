@@ -11,7 +11,6 @@ import {
   confirmAlert,
   Alert,
   environment,
-  Keyboard,
 } from "@raycast/api";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { readdir, rm, mkdir } from "fs/promises";
@@ -19,6 +18,8 @@ import { join } from "path";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { createHash } from "crypto";
+import { homedir } from "os";
+import { writeFile } from "fs/promises";
 
 interface Settings {
   animeDirectory: string;
@@ -46,6 +47,7 @@ const LAST_PLAYED_KEY = "last_played_media_v4";
 const THUMBNAILS_CACHE_KEY = "thumbnails_cache_v1";
 const processingThumbnails = new Set<string>();
 const thumbnailCachePath = join(environment.supportPath, "thumbnails");
+const ffmpegPath = join(environment.supportPath, "bin", "ffmpeg.exe");
 let activeGenerations = 0;
 
 export default function Command() {
@@ -488,7 +490,39 @@ async function getTitleInfo(path: string) {
   }
 }
 
+async function getFFmpeg(): Promise<string> {
+  try {
+    await new Promise((resolve, reject) => {
+      spawn("ffmpeg", ["-version"], { stdio: "ignore" })
+        .on("close", (code) => (code === 0 ? resolve(null) : reject()))
+        .on("error", reject);
+    });
+    return "ffmpeg";
+  } catch {
+    if (existsSync(ffmpegPath)) return ffmpegPath;
+    await mkdir(join(environment.supportPath, "bin"), { recursive: true });
+    await showToast({
+      style: Toast.Style.Animated,
+      title: "Загрузка ffmpeg...",
+    });
+
+    const url =
+      "https://github.com/eugeneware/ffmpeg-static/releases/latest/download/ffmpeg-win32-x64";
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Не удалось скачать");
+    const buffer = await response.arrayBuffer();
+    await writeFile(ffmpegPath, new Uint8Array(buffer));
+    await showToast({
+      style: Toast.Style.Success,
+      title: "ffmpeg загружен",
+    });
+
+    return ffmpegPath;
+  }
+}
+
 async function generateThumbnail(videoFile: string, thumbnailPath: string) {
+  const ffmpegBin = await getFFmpeg();
   const args = [
     "-ss",
     "00:05:00",
@@ -508,7 +542,7 @@ async function generateThumbnail(videoFile: string, thumbnailPath: string) {
     thumbnailPath,
   ];
 
-  const ffmpeg = spawn("ffmpeg", args);
+  const ffmpeg = spawn(ffmpegBin, args);
 
   await new Promise<void>((resolve, reject) => {
     ffmpeg.on("close", (code) => {
