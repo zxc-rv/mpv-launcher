@@ -65,7 +65,6 @@ export default function Command() {
   >({});
   const [searchText, setSearchText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-
   const filteredtitles = useMemo(() => {
     let filtered = titles;
 
@@ -314,12 +313,12 @@ export default function Command() {
           message: `Removed "${title.name}"`,
         });
 
-        const updatedtitles = titles.filter((f) => f.path !== title.path);
+        const updatedTitles = titles.filter((f) => f.path !== title.path);
         const updatedLastPlayed = lastPlayed.filter(
           (item) => item.path !== title.path,
         );
 
-        setTitles(updatedtitles);
+        setTitles(updatedTitles);
         setLastPlayed(updatedLastPlayed);
 
         await LocalStorage.setItem(
@@ -361,6 +360,7 @@ export default function Command() {
             title="Открыть директорию"
             target={title.path}
             icon={Icon.Folder}
+            shortcut={{ modifiers: ["ctrl"], key: "enter" }}
           />
         </ActionPanel.Section>
         <ActionPanel.Section>
@@ -369,7 +369,7 @@ export default function Command() {
             icon={Icon.Trash}
             style={Action.Style.Destructive}
             onAction={() => deleteTitleFolder(title)}
-            shortcut={Keyboard.Shortcut.Common.Remove}
+            shortcut={{ modifiers: ["ctrl"], key: "d" }}
           />
         </ActionPanel.Section>
       </ActionPanel>
