@@ -4,7 +4,7 @@
   "title": "MPV Launcher",
   "description": "Browse and play media files using MPV player",
   "icon": "icon.png",
-  "author": "Revolution",
+  "author": "the_revolution",
   "categories": [
     "Media"
   ],
@@ -27,7 +27,7 @@
       "description": "Full path to your anime directory",
       "type": "textfield",
       "required": true,
-      "default": "S:/Videos/Аниме"
+      "default": "V:/Videos/Аниме"
     },
     {
       "name": "animeArguments",
@@ -59,7 +59,7 @@
       "description": "Full path to your films directory",
       "type": "textfield",
       "required": true,
-      "default": "S:/Videos/Фильмы"
+      "default": "V:/Videos/Фильмы"
     },
     {
       "name": "filmsArguments",
@@ -71,7 +71,7 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.103.4",
+    "@raycast/api": "^1.103.0",
     "@raycast/utils": "^2.2.1"
   },
   "devDependencies": {
