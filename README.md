@@ -12,5 +12,6 @@ winget install Node.js
 3. Установить плагин
 
 ```
-git clone https://github.com/zxc-rv/mpv-launcher && cd mpv-launcher && npm install && npm run dev
+git clone https://github.com/zxc-rv/mpv-launcher && cd mpv-launcher && npm i && npm run dev
 ```
+
